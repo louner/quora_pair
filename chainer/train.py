@@ -23,6 +23,8 @@ import chainer.functions as F
 import chainer.links as L
 from chainer import optimizers
 
+import json
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', '-g', default=-1, type=int,
@@ -117,7 +119,7 @@ class RecursiveNet(chainer.Chain):
     def node(self, left, right):
         return F.tanh(self.fc(F.concat((left, right))))
 
-def traverse(model, node, evaluate=None, root=True):
+def traverse(model, node):
     if isinstance(node['node'], int):
         # leaf node
         word = xp.array([node['node']], np.int32)
@@ -126,13 +128,26 @@ def traverse(model, node, evaluate=None, root=True):
     else:
         # internal node
         left_node, right_node = node['node']
-        left = traverse(model, left_node, evaluate=evaluate, root=False)
-        right = traverse(model, right_node, evaluate=evaluate, root=False)
+        left = traverse(model, left_node)
+        right = traverse(model, right_node)
 
         v = model.node(left, right)
 
     return v
 
+class PredictNet(chainer.Chain):
+	def __init__(self, n_vocab, n_units):
+		super(PredictNet, self).__init__()
+		with self.init_scope():
+			self.fc = L.Linear(2*n_units, 2)
+			self.net = RecursiveNet(n_vocab, n_units)
+
+	def __call__(self, instance):
+		sentence1, sentence2, label = json.loads(instance)
+		tree1 = traverse(self.net, sentence1)
+		tree2 = traverse(self.net, sentence2)
+
+		return F.softmax(self.fc(F.concat(tree1, tree2)))
 
 def evaluate(model, test_trees):
     result = collections.defaultdict(lambda: 0)
