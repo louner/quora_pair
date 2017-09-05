@@ -93,18 +93,9 @@ def convert_tree(vocab, exp):
         return {'label': int(label), 'node': node}
 
 
-def read_corpus(path, vocab, max_size):
-    with codecs.open(path, encoding='utf-8') as f:
-        trees = []
-        for line in f:
-            line = line.strip()
-            tree = SexpParser(line).parse()
-            trees.append(convert_tree(vocab, tree))
-            if max_size and len(trees) >= max_size:
-                break
-
-        return trees
-
+def read_corpus(path):
+	with open(path) as f:
+	return [line.strip('\n') for line in f.readline()]
 
 class RecursiveNet(chainer.Chain):
     def __init__(self, n_vocab, n_units):
@@ -136,11 +127,11 @@ def traverse(model, node):
     return v
 
 class PredictNet(chainer.Chain):
-	def __init__(self, n_vocab, n_units):
+	def __init__(self, n_vocab, embedding_size):
 		super(PredictNet, self).__init__()
 		with self.init_scope():
-			self.fc = L.Linear(2*n_units, 2)
-			self.net = RecursiveNet(n_vocab, n_units)
+			self.fc = L.Linear(2*embedding_size, 2)
+			self.net = RecursiveNet(n_vocab, embedding_size)
 
 	def __call__(self, instance):
 		sentence1, sentence2, label = json.loads(instance)
@@ -162,17 +153,12 @@ def evaluate(model, test_trees):
     print(' Root accuracy: {0:.2f} %% ({1:,d}/{2:,d})'.format(
         acc_root, result['correct_root'], result['total_root']))
 
+train_trees = read_corpus('train/tree')
+test_trees = read_corpus('test/tree')
+vocab_size = 1
+embedding_size = 30
 
-vocab = {}
-if args.test:
-    max_size = 10
-else:
-    max_size = None
-train_trees = read_corpus('trees/train.txt', vocab, max_size)
-test_trees = read_corpus('trees/test.txt', vocab, max_size)
-develop_trees = read_corpus('trees/dev.txt', vocab, max_size)
-
-model = RecursiveNet(len(vocab), n_units)
+model = PredictNet(vocab_size, embedding_size)
 
 if args.gpu >= 0:
     model.to_gpu()
