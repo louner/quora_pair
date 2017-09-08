@@ -54,9 +54,12 @@ batchsize = args.batchsize      # minibatch size
 n_label = args.label         # number of labels
 epoch_per_eval = args.epocheval  # number of epochs per evaluation
 
+train_data_path = '/home/louner/school/ml/tree-rnn/train'
+test_data_path = '/home/louner/school/ml/tree-rnn/test'
+
 def read_corpus(path):
 	with open(path) as f:
-		return [line.strip('\n') for line in f.readline()]
+		return [line.strip('\n') for line in f]
 
 class RecursiveNet(chainer.Chain):
 	def __init__(self, n_vocab, n_units):
@@ -93,13 +96,16 @@ class PredictNet(chainer.Chain):
 			self.net = RecursiveNet(n_vocab, embedding_size)
 
 	def __call__(self, instance):
-		sentence1, sentence2, label, id = json.loads(instance)
+		#sentence1, sentence2, label, id = json.loads(instance)
+		sentence1, sentence2, label, id = instance
 		tree1, tree2 = WordNode(sentence1), WordNode(sentence2)
 
 		graph1 = traverse(self.net, tree1)
 		graph2 = traverse(self.net, tree2)
 
-		return F.softmax(self.fc(F.concat((graph1, graph2)))), id
+		self.id = id
+
+		return self.fc(F.concat((graph1, graph2)))
 
 def evaluate(model, test_trees):
 	result = collections.defaultdict(lambda: 0)
