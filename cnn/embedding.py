@@ -22,6 +22,8 @@ logger.addHandler(handler)
 
 dictionary = json.load(open('%s.json' % (vocab_file_path)))
 
+np.random.seed(0)
+
 def make_embed_matrix(vocab_file_path):
     embed_matrix = []
     with open(vocab_file_path) as f:
@@ -111,7 +113,7 @@ def make_batch():
         saver = tf.train.Saver(var_list=[W])
         saver.restore(sess, './models/embed_matrix.ckpt')
 
-        print(sess.run(embedding, feed_dict={input: batch}).shape)
+        print(sess.run(embedding, feed_dict={input: batch}))
 
 #save_embed()
 #load_embed()
