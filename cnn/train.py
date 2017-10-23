@@ -3,63 +3,121 @@ import numpy as np
 import pandas as pd
 import json
 
-#np.random.seed(0)
+np.random.seed(0)
 
 vocab_file_path = '/home/louner/school/ml/tree-rnn/data/vocab'
 df = pd.read_csv('/home/louner/school/ml/quora_pair/cnn/data/train.csv')
-question1 = df['question1']
 dictionary = json.load(open('%s.json' % (vocab_file_path)))
 
 batch_size = 500
 embedding_size = 300
 kernel_height = 4
 vocab_shape=(85540, 300)
+kernel_size = (kernel_height, embedding_size)
+kernel_number = 32
+num_classes = 2
+learning_rate = 0.001
 
-# batch size and sentence length is unknown
-inp = tf.placeholder(shape=(None, None), dtype=tf.int32)
+def build_network(x, longest_length, W):
+    # load embedding W
+    embedding = tf.nn.embedding_lookup(params=W, ids=x)
 
-# tensor for longest sentence length of each batch
-longest_length = tf.placeholder(dtype=tf.int32)
+    # reshape to NHWC
+    # H -> longest sentence length
+    reshape = tf.reshape(embedding, shape=(-1, longest_length, embedding_size, 1))
 
-# load embedding W
-W = tf.get_variable(name='W', shape=vocab_shape, trainable=False)
-embedding = tf.nn.embedding_lookup(params=W, ids=inp)
+    # pad at both ends of a sentence
+    pad = tf.pad(reshape, [[0, 0], [kernel_height - 1, kernel_height - 1], [0, 0], [0, 0]])
 
-# reshape to NHWC
-# H -> longest sentence length
-reshape = tf.reshape(embedding, shape=(-1, longest_length, embedding_size, 1))
+    # output: batch_size, longest_length+(kernel_height-1)*2-(kernel_hefight-1), 1, kernel_number
+    # w-op
+    conv1 = tf.layers.conv2d(pad,
+                            filters=kernel_number,
+                            kernel_size=kernel_size,
+                            strides=(1, 1),
+                            padding='valid',
+                            activation=tf.tanh)
 
-# pad at both ends of a sentence
-pad = tf.pad(reshape, [[0, 0], [kernel_height-1, kernel_height-1], [0, 0], [0, 0]])
+    # output: batch_size, longest_length, 1, kernel_number
+    pool1 = tf.nn.pool(conv1,
+                      window_shape=(kernel_height, 1),
+                      pooling_type='AVG',
+                      padding='VALID')
 
-conv1 = tf.layers.conv2d(pad,
-                        filters=32,
-                        kernel_size=(kernel_height, embedding_size),
-                        strides=(1, 1),
-                        padding='valid',
-                        activation=tf.tanh)
+    # output: batch_size, 1, 1, kernel_number
+    # all-op
+    final_pool = tf.reduce_mean(pool1,
+                                axis=1)
 
+    # batch_size, kernel_number
+    output = tf.reshape(final_pool, shape=
+    (-1, kernel_number))
+    return output
 
+def padding(batch, longest_sentence_length):
+    batch = np.array(batch)
+    zeros = np.zeros((batch_size, longest_sentence_length))
+    for i in range(batch_size):
+        zeros[i, :len(batch[i])] = batch[i]
+    batch = zeros
+    return batch
+
+def to_word_id(batch):
+    batch = [[dictionary[tok] for tok in sentence.split(' ') if tok in dictionary] for sentence in batch]
+    longest_sentence_length = max([len(ids) for ids in batch])
+    return batch, longest_sentence_length
+
+def preprocess(batch):
+    batch, longest_sentence_length = to_word_id(batch)
+    batch = padding(batch, longest_sentence_length)
+    return batch, longest_sentence_length
 
 with tf.Session() as sess:
+    W = tf.get_variable(name='W', shape=vocab_shape, trainable=False)
+
+    # batch size and sentence length is unknown
+    # tensor for longest sentence length of each batch
+    labels = tf.placeholder(dtype=tf.int32)
+    question1 = tf.placeholder(shape=(None, None), dtype=tf.int32)
+    question2 = tf.placeholder(shape=(None, None), dtype=tf.int32)
+    question1_longest_length = tf.placeholder(dtype=tf.int32)
+    question2_longest_length = tf.placeholder(dtype=tf.int32)
+
+    # reuse the same network parameters
+    with tf.variable_scope('network'):
+        network1 = build_network(question1, question1_longest_length, W)
+
+    with tf.variable_scope('network', reuse=True):
+        network2 = build_network(question2, question2_longest_length, W)
+
+    # concat question1 and question2 in batch
+    fc_layer = tf.concat([network1, network2], axis=1)
+    predict = tf.layers.dense(fc_layer,
+                    num_classes,
+                    activation=tf.nn.relu,
+                    use_bias=True)
+
+    loss = tf.reduce_sum(tf.log(tf.nn.softmax(predict)) * tf.one_hot(labels, depth=num_classes)) * -1
+
+    train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+
     init = tf.global_variables_initializer()
     sess.run(init)
 
     saver = tf.train.Saver(var_list=[W])
     saver.restore(sess, './models/embed_matrix.ckpt')
 
-    for step in range(1):
-        batch = question1.sample(batch_size).values
+    batch = df[['question1', 'question2', 'is_duplicate']].sample(batch_size)
+    for step in range(100):
+        #batch = df[['question1', 'question2','is_duplicate']].sample(batch_size)
+        q1_batch, q2_batch, y = batch['question1'].values, batch['question2'].values, batch['is_duplicate'].values
 
-        batch = [[dictionary[tok] for tok in sentence.split(' ') if tok in dictionary] for sentence in batch]
+        q1_batch, q1_longest_sentence_length = preprocess(q1_batch)
+        q2_batch, q2_longest_sentence_length = preprocess(q2_batch)
 
-        longest_sentence_length = max([len(ids) for ids in batch])
-        batch = np.array(batch)
-        zeros = np.zeros((batch_size, longest_sentence_length))
-        for i in range(batch_size):
-            zeros[i, :len(batch[i])] = batch[i]
-        batch = zeros
-        print(longest_sentence_length)
-
-        d = sess.run(conv1, feed_dict={inp: batch, longest_length: longest_sentence_length})
-        print(d.shape)
+        _, l = sess.run([train_step, loss], feed_dict={question1: q1_batch,
+                                                   question1_longest_length: q1_longest_sentence_length,
+                                                   question2: q2_batch,
+                                                   question2_longest_length: q2_longest_sentence_length,
+                                                   labels: y})
+        print(step, l/batch_size)
