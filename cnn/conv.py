@@ -57,5 +57,16 @@ def layers_conv():
         d = sess.run(conv, feed_dict={X: batch_x})
         print(d.shape)
 
+def pool():
+    mat = np.zeros((3,3))
+    mat[2, 2] = 1
+    print(mat)
+    inp = tf.reshape(tf.constant(mat, dtype=tf.float32), shape=(1, 3, 3, 1))
+    pool = tf.nn.pool(inp, window_shape=(2, 2), pooling_type='MAX', padding='VALID')
+
+    with tf.Session() as sess:
+        d = sess.run(pool)
+        print(d)
+
 #nn_conv2d()
 #layers_conv()
