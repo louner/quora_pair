@@ -2,17 +2,26 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 import json
+import logging
+from time import time
+
+from embedding import vocab_file_path
+
+handler = logging.FileHandler('./log/train.log')
+handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+logger.addHandler(handler)
 
 np.random.seed(0)
 
-vocab_file_path = '/home/louner/school/ml/tree-rnn/data/vocab'
-df = pd.read_csv('/home/louner/school/ml/quora_pair/cnn/data/train.csv')
+df = pd.read_csv('/home/allen_kuo/quora_pair/cnn/data/train.csv')
 dictionary = json.load(open('%s.json' % (vocab_file_path)))
 
-batch_size = 500
+batch_size = 10002
 embedding_size = 300
 kernel_height = 4
-vocab_shape=(85540, 300)
+vocab_shape=(67114, 300)
 kernel_size = (kernel_height, embedding_size)
 kernel_number = 32
 num_classes = 2
@@ -48,7 +57,7 @@ def build_network(x, longest_length, W):
     # all-op
     final_pool = tf.reduce_mean(pool1,
                                 axis=1)
-
+    
     # batch_size, kernel_number
     output = tf.reshape(final_pool, shape=
     (-1, kernel_number))
@@ -63,7 +72,7 @@ def padding(batch, longest_sentence_length):
     return batch
 
 def to_word_id(batch):
-    batch = [[dictionary[tok] for tok in sentence.split(' ') if tok in dictionary] for sentence in batch]
+    batch = [[dictionary[tok] for tok in str(sentence).split(' ') if tok in dictionary] for sentence in batch]
     longest_sentence_length = max([len(ids) for ids in batch])
     return batch, longest_sentence_length
 
@@ -107,17 +116,26 @@ with tf.Session() as sess:
     saver = tf.train.Saver(var_list=[W])
     saver.restore(sess, './models/embed_matrix.ckpt')
 
-    batch = df[['question1', 'question2', 'is_duplicate']].sample(batch_size)
-    for step in range(100):
-        #batch = df[['question1', 'question2','is_duplicate']].sample(batch_size)
-        q1_batch, q2_batch, y = batch['question1'].values, batch['question2'].values, batch['is_duplicate'].values
+    for epoch in range(100):
+        st = time()
+        for step in range(df.shape[0]/batch_size+1):
+            try:
+                batch = df[['question1', 'question2','is_duplicate']].sample(batch_size)
+                q1_batch, q2_batch, y = batch['question1'].values, batch['question2'].values, batch['is_duplicate'].values
 
-        q1_batch, q1_longest_sentence_length = preprocess(q1_batch)
-        q2_batch, q2_longest_sentence_length = preprocess(q2_batch)
+                q1_batch, q1_longest_sentence_length = preprocess(q1_batch)
+                q2_batch, q2_longest_sentence_length = preprocess(q2_batch)
 
-        _, l = sess.run([train_step, loss], feed_dict={question1: q1_batch,
-                                                   question1_longest_length: q1_longest_sentence_length,
-                                                   question2: q2_batch,
-                                                   question2_longest_length: q2_longest_sentence_length,
-                                                   labels: y})
-        print(step, l/batch_size)
+                _, l = sess.run([train_step, loss], feed_dict={question1: q1_batch,
+                                                           question1_longest_length: q1_longest_sentence_length,
+                                                           question2: q2_batch,
+                                                           question2_longest_length: q2_longest_sentence_length,
+                                                           labels: y})
+                logger.info('%d %f %f'%(step, time()-st, l/batch_size))
+
+            except:
+                import traceback
+                logger.error(traceback.format_exc())
+
+        saver = tf.train.Saver()
+        saver.save(sess, './models/cnn_one_layer_%d.ckpt'%(epoch))
