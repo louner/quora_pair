@@ -16,9 +16,10 @@ logger.addHandler(handler)
 np.random.seed(0)
 
 df = pd.read_csv('/home/allen_kuo/quora_pair/cnn/data/train.csv')
+#df = pd.read_csv('/home/allen_kuo/quora_pair/cnn/data/toy/train.csv').sample(frac=1)
 dictionary = json.load(open('%s.json' % (vocab_file_path)))
 
-batch_size = 10002
+batch_size = 10000
 embedding_size = 300
 kernel_height = 4
 vocab_shape=(67114, 300)
@@ -65,6 +66,7 @@ def build_network(x, longest_length, W):
 
 def padding(batch, longest_sentence_length):
     batch = np.array(batch)
+    batch_size = batch.shape[0]
     zeros = np.zeros((batch_size, longest_sentence_length))
     for i in range(batch_size):
         zeros[i, :len(batch[i])] = batch[i]
@@ -118,8 +120,9 @@ def build_graph(sess):
 
     return predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels
 
-def make_batch(df, batch_size=batch_size):
-    batch = df[['question1', 'question2','is_duplicate']].sample(batch_size)
+def make_batch(df, st_index, batch_size=batch_size):
+    
+    batch = df[['question1', 'question2','is_duplicate']].iloc[st_index:st_index+batch_size, :]
     q1_batch, q2_batch, y = batch['question1'].values, batch['question2'].values, batch['is_duplicate'].values
 
     q1_batch, q1_longest_sentence_length = preprocess(q1_batch)
@@ -134,20 +137,25 @@ if __name__ == '__main__':
 
         for epoch in range(100):
             st = time()
+            all_loss = 0
             for step in range(df.shape[0]/batch_size+1):
                 try:
-                    q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df)
+                    st_index = step*batch_size
+                    q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, st_index)
 
                     _, l = sess.run([train_step, loss], feed_dict={question1: q1_batch,
                                                                question1_longest_length: q1_longest_sentence_length,
                                                                question2: q2_batch,
                                                                question2_longest_length: q2_longest_sentence_length,
                                                                labels: y})
-                    logger.info('%d %f %f'%(step, time()-st, l/batch_size))
+                    logger.info('%d %d %f %f'%(epoch, step, time()-st, l/batch_size))
+                    all_loss += l/batch_size
 
                 except:
                     import traceback
                     logger.error(traceback.format_exc())
+
+            logger.info('%d epoch avg loss: %f'%(epoch, all_loss/(df.shape[0]/batch_size+1)))
 
             saver = tf.train.Saver()
             saver.save(sess, './models/cnn_one_layer_%d.ckpt'%(epoch))
