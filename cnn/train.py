@@ -81,7 +81,7 @@ def preprocess(batch):
     batch = padding(batch, longest_sentence_length)
     return batch, longest_sentence_length
 
-with tf.Session() as sess:
+def build_graph(sess):
     W = tf.get_variable(name='W', shape=vocab_shape, trainable=False)
 
     # batch size and sentence length is unknown
@@ -116,26 +116,38 @@ with tf.Session() as sess:
     saver = tf.train.Saver(var_list=[W])
     saver.restore(sess, './models/embed_matrix.ckpt')
 
-    for epoch in range(100):
-        st = time()
-        for step in range(df.shape[0]/batch_size+1):
-            try:
-                batch = df[['question1', 'question2','is_duplicate']].sample(batch_size)
-                q1_batch, q2_batch, y = batch['question1'].values, batch['question2'].values, batch['is_duplicate'].values
+    return predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels
 
-                q1_batch, q1_longest_sentence_length = preprocess(q1_batch)
-                q2_batch, q2_longest_sentence_length = preprocess(q2_batch)
+def make_batch(df, batch_size=batch_size):
+    batch = df[['question1', 'question2','is_duplicate']].sample(batch_size)
+    q1_batch, q2_batch, y = batch['question1'].values, batch['question2'].values, batch['is_duplicate'].values
 
-                _, l = sess.run([train_step, loss], feed_dict={question1: q1_batch,
-                                                           question1_longest_length: q1_longest_sentence_length,
-                                                           question2: q2_batch,
-                                                           question2_longest_length: q2_longest_sentence_length,
-                                                           labels: y})
-                logger.info('%d %f %f'%(step, time()-st, l/batch_size))
+    q1_batch, q1_longest_sentence_length = preprocess(q1_batch)
+    q2_batch, q2_longest_sentence_length = preprocess(q2_batch)
 
-            except:
-                import traceback
-                logger.error(traceback.format_exc())
+    return q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y
 
-        saver = tf.train.Saver()
-        saver.save(sess, './models/cnn_one_layer_%d.ckpt'%(epoch))
+if __name__ == '__main__':
+    with tf.Session() as sess:
+
+        predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels = build_graph(sess)
+
+        for epoch in range(100):
+            st = time()
+            for step in range(df.shape[0]/batch_size+1):
+                try:
+                    q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df)
+
+                    _, l = sess.run([train_step, loss], feed_dict={question1: q1_batch,
+                                                               question1_longest_length: q1_longest_sentence_length,
+                                                               question2: q2_batch,
+                                                               question2_longest_length: q2_longest_sentence_length,
+                                                               labels: y})
+                    logger.info('%d %f %f'%(step, time()-st, l/batch_size))
+
+                except:
+                    import traceback
+                    logger.error(traceback.format_exc())
+
+            saver = tf.train.Saver()
+            saver.save(sess, './models/cnn_one_layer_%d.ckpt'%(epoch))
