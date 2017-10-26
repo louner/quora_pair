@@ -4,6 +4,7 @@ import pandas as pd
 import json
 import logging
 from time import time
+from sklearn.metrics import precision_score, recall_score
 
 from embedding import vocab_file_path
 
@@ -121,7 +122,6 @@ def build_graph(sess):
     return predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels
 
 def make_batch(df, st_index, batch_size=batch_size):
-    
     batch = df[['question1', 'question2','is_duplicate']].iloc[st_index:st_index+batch_size, :]
     q1_batch, q2_batch, y = batch['question1'].values, batch['question2'].values, batch['is_duplicate'].values
 
@@ -130,10 +130,20 @@ def make_batch(df, st_index, batch_size=batch_size):
 
     return q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y
 
+def evaluate(predicts, labels):
+    predicts = pd.DataFrame(predicts)
+    pred = (predicts[1] > predicts[0]).astype(int).values
+
+    # skip UndefinedMetricWarning when al lprediction is 0/1
+    pred[0] = 1
+    precision, recall = precision_score(labels, pred), recall_score(labels, pred)
+    return precision, recall
+
 if __name__ == '__main__':
     with tf.Session() as sess:
 
         predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels = build_graph(sess)
+        saver = tf.train.Saver()
 
         for epoch in range(100):
             st = time()
@@ -148,7 +158,7 @@ if __name__ == '__main__':
                                                                question2: q2_batch,
                                                                question2_longest_length: q2_longest_sentence_length,
                                                                labels: y})
-                    logger.info('%d %d %f %f'%(epoch, step, time()-st, l/batch_size))
+                    logger.info('training %d %d %f %f'%(epoch, step, time()-st, l/batch_size))
                     all_loss += l/batch_size
 
                 except:
@@ -157,5 +167,14 @@ if __name__ == '__main__':
 
             logger.info('%d epoch avg loss: %f'%(epoch, all_loss/(df.shape[0]/batch_size+1)))
 
-            saver = tf.train.Saver()
-            saver.save(sess, './models/cnn_one_layer_%d.ckpt'%(epoch))
+            #saver.save(sess, './models/cnn_one_layer_%d.ckpt'%(epoch))
+
+            q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, 0, batch_size=df.shape[0])
+            predicts = sess.run([predict], feed_dict={question1: q1_batch,
+                                                       question1_longest_length: q1_longest_sentence_length,
+                                                       question2: q2_batch,
+                                                       question2_longest_length: q2_longest_sentence_length,
+                                                       labels: y})
+            predicts = predicts[0]
+            precision, recall =  evaluate(predicts, y)
+            logger.info('%dth epoch PR: %f %f'%(epoch, precision, recall))
