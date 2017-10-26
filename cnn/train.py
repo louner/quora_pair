@@ -14,7 +14,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 
-np.random.seed(0)
+#np.random.seed(0)
 
 df = pd.read_csv('/home/allen_kuo/quora_pair/cnn/data/train.csv')
 #df = pd.read_csv('/home/allen_kuo/quora_pair/cnn/data/toy/train.csv').sample(frac=1)
@@ -145,10 +145,13 @@ if __name__ == '__main__':
         predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels = build_graph(sess)
         saver = tf.train.Saver()
 
-        for epoch in range(100):
+        for epoch in range(1000):
             st = time()
             all_loss = 0
-            for step in range(df.shape[0]/batch_size+1):
+            df = df.sample(frac=1)
+            total_steps = df.shape[0]/batch_size+1
+
+            for step in range(total_steps):
                 try:
                     st_index = step*batch_size
                     q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, st_index)
@@ -165,16 +168,23 @@ if __name__ == '__main__':
                     import traceback
                     logger.error(traceback.format_exc())
 
-            logger.info('%d epoch avg loss: %f'%(epoch, all_loss/(df.shape[0]/batch_size+1)))
+            logger.info('%d epoch avg loss: %f'%(epoch, all_loss/total_steps))
 
             #saver.save(sess, './models/cnn_one_layer_%d.ckpt'%(epoch))
 
-            q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, 0, batch_size=df.shape[0])
-            predicts = sess.run([predict], feed_dict={question1: q1_batch,
-                                                       question1_longest_length: q1_longest_sentence_length,
-                                                       question2: q2_batch,
-                                                       question2_longest_length: q2_longest_sentence_length,
-                                                       labels: y})
-            predicts = predicts[0]
-            precision, recall =  evaluate(predicts, y)
+            total_precision, total_recall = 0.0, 0.0
+            for step in range(total_steps):
+                st_index = step*batch_size
+                q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, st_index)
+                predicts = sess.run([predict], feed_dict={question1: q1_batch,
+                                                           question1_longest_length: q1_longest_sentence_length,
+                                                           question2: q2_batch,
+                                                           question2_longest_length: q2_longest_sentence_length,
+                                                           labels: y})
+                predicts = predicts[0]
+                precision, recall =  evaluate(predicts, y)
+                total_precision += precision
+                total_recall += recall
+
+            precision, recall = total_precision/total_steps, total_recall/total_steps
             logger.info('%dth epoch PR: %f %f'%(epoch, precision, recall))
