@@ -2,13 +2,13 @@ import json
 import numpy as np
 import tensorflow as tf
 import pandas as pd
+from nltk import word_tokenize
 embedding_size = 300
 
 from gensim.models.keyedvectors import KeyedVectors
 word2vec_model_filepath = '/home/louner/school/ml/word2vec-GoogleNews-vectors/GoogleNews-vectors-negative300.bin'
-#w2v = KeyedVectors.load_word2vec_format(word2vec_model_filepath, binary=True)
 
-vocab_file_path = '/home/louner/school/ml/tree-rnn/data/vocab'
+vocab_file_path = './data/train.csv.vocab'
 vocab_shape=(85540, 300)
 batch_size = 5
 
@@ -22,10 +22,35 @@ logger.addHandler(handler)
 
 dictionary = json.load(open('%s.json' % (vocab_file_path)))
 
-np.random.seed(0)
+def tokenize(sentence):
+    for tok in word_tokenize(sentence):
+        yield tok
+
+def preprocess(sentences):
+    sentences_preprocessed = []
+    for sentence in sentences:
+        if type(sentence) != str:
+            continue
+
+        if sentence[-1] == '?':
+            sentence = sentence[:-1]
+        sentences_preprocessed.append(sentence)
+    return sentences_preprocessed
+
+def make_vocab(data_filepath='./data/train.csv'):
+    df = pd.read_csv(data_filepath)
+    sentences = df['question1'].values.tolist() + df['question2'].values.tolist()
+
+    sentences = preprocess(sentences)
+
+    vocabs = list(set([tok for sentence in sentences for tok in tokenize(sentence)]))
+    with open('%s.vocab'%(data_filepath), 'w') as f:
+        f.write('\n'.join(vocabs))
 
 def make_embed_matrix(vocab_file_path):
-    embed_matrix = []
+    w2v = KeyedVectors.load_word2vec_format(word2vec_model_filepath, binary=True)
+    dictionary = {'@UNSEEN@': 0}
+    embed_matrix = [[0]*embedding_size]
     with open(vocab_file_path) as f:
         for word in f:
             word = word.strip('\n').lower()
@@ -43,7 +68,7 @@ def make_embed_matrix(vocab_file_path):
     return np.reshape(embed_matrix, embed_matrix.shape)
 
 def save_embed():
-    embed_matrix = make_embed_matrix('/home/louner/school/ml/tree-rnn/data/vocab')
+    embed_matrix = make_embed_matrix(vocab_file_path=vocab_file_path)
 
     W = tf.get_variable(name='W', shape=embed_matrix.shape, initializer=tf.constant_initializer(embed_matrix))
 
@@ -115,7 +140,8 @@ def make_batch():
 
         print(sess.run(embedding, feed_dict={input: batch}))
 
+#make_vocab()
 #save_embed()
 #load_embed()
 #trans()
-make_batch()
+#make_batch()
