@@ -6,15 +6,13 @@ import logging
 from time import time
 from sklearn.metrics import precision_score, recall_score
 
-from embedding import vocab_file_path
+from embedding import vocab_file_path, tokenize
 
 handler = logging.FileHandler('./log/train.log')
 handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 logger.addHandler(handler)
-
-#np.random.seed(0)
 
 df = pd.read_csv('./data/train.csv')
 #df = pd.read_csv('/home/allen_kuo/quora_pair/cnn/data/toy/train.csv').sample(frac=1)
@@ -23,11 +21,11 @@ dictionary = json.load(open('%s.json' % (vocab_file_path)))
 batch_size = 5000
 embedding_size = 300
 kernel_height = 4
-vocab_shape = (66206, 300)
+vocab_shape = (66207, 300)
 kernel_size = (kernel_height, embedding_size)
-kernel_number = 128
+kernel_number = 32
 num_classes = 2
-learning_rate = 0.001
+learning_rate = 0.01
 epoch_number = 100
 
 def build_network(x, longest_length, W):
@@ -75,7 +73,7 @@ def padding(batch, longest_sentence_length):
     return batch
 
 def to_word_id(batch):
-    batch = [[dictionary[tok] for tok in str(sentence).split(' ') if tok in dictionary] for sentence in batch]
+    batch = [[dictionary[tok] for tok in tokenize(sentence) if tok in dictionary] for sentence in batch]
     longest_sentence_length = max([len(ids) for ids in batch])
     return batch, longest_sentence_length
 
@@ -111,7 +109,7 @@ def build_graph(sess):
 
     loss = tf.reduce_sum(tf.log(tf.nn.softmax(predict)) * tf.one_hot(labels, depth=num_classes)) * -1
 
-    train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+    train_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
 
     init = tf.global_variables_initializer()
     sess.run(init)
@@ -144,7 +142,6 @@ def train(df, model_filepath, epoch_number, graphs, sess):
 
     saver = tf.train.Saver()
 
-    print(epoch_number)
     for epoch in range(epoch_number):
         st = time()
         all_loss = 0
