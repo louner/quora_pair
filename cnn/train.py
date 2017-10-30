@@ -16,18 +16,19 @@ logger.addHandler(handler)
 
 #np.random.seed(0)
 
-df = pd.read_csv('/home/allen_kuo/quora_pair/cnn/data/train.csv')
+df = pd.read_csv('./data/train.csv')
 #df = pd.read_csv('/home/allen_kuo/quora_pair/cnn/data/toy/train.csv').sample(frac=1)
 dictionary = json.load(open('%s.json' % (vocab_file_path)))
 
-batch_size = 10000
+batch_size = 5000
 embedding_size = 300
 kernel_height = 4
-vocab_shape=(67114, 300)
+vocab_shape = (66206, 300)
 kernel_size = (kernel_height, embedding_size)
-kernel_number = 32
+kernel_number = 128
 num_classes = 2
 learning_rate = 0.001
+epoch_number = 100
 
 def build_network(x, longest_length, W):
     # load embedding W
@@ -61,8 +62,7 @@ def build_network(x, longest_length, W):
                                 axis=1)
     
     # batch_size, kernel_number
-    output = tf.reshape(final_pool, shape=
-    (-1, kernel_number))
+    output = tf.reshape(final_pool, shape=(-1, kernel_number))
     return output
 
 def padding(batch, longest_sentence_length):
@@ -139,52 +139,65 @@ def evaluate(predicts, labels):
     precision, recall = precision_score(labels, pred), recall_score(labels, pred)
     return precision, recall
 
-if __name__ == '__main__':
-    with tf.Session() as sess:
+def train(df, model_filepath, epoch_number, graphs, sess):
+    predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels = graphs
 
-        predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels = build_graph(sess)
-        saver = tf.train.Saver()
+    saver = tf.train.Saver()
 
-        for epoch in range(1000):
-            st = time()
-            all_loss = 0
-            df = df.sample(frac=1)
-            total_steps = df.shape[0]/batch_size+1
+    print(epoch_number)
+    for epoch in range(epoch_number):
+        st = time()
+        all_loss = 0
+        df = df.sample(frac=1)
+        total_steps = int(df.shape[0]/batch_size+1)
 
-            for step in range(total_steps):
-                try:
-                    st_index = step*batch_size
-                    q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, st_index)
-
-                    _, l = sess.run([train_step, loss], feed_dict={question1: q1_batch,
-                                                               question1_longest_length: q1_longest_sentence_length,
-                                                               question2: q2_batch,
-                                                               question2_longest_length: q2_longest_sentence_length,
-                                                               labels: y})
-                    logger.info('training %d %d %f %f'%(epoch, step, time()-st, l/batch_size))
-                    all_loss += l/batch_size
-
-                except:
-                    import traceback
-                    logger.error(traceback.format_exc())
-
-            logger.info('%d epoch avg loss: %f'%(epoch, all_loss/total_steps))
-
-            #saver.save(sess, './models/cnn_one_layer_%d.ckpt'%(epoch))
-
-            total_precision, total_recall = 0.0, 0.0
-            for step in range(total_steps):
+        for step in range(total_steps):
+            try:
                 st_index = step*batch_size
                 q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, st_index)
-                predicts = sess.run([predict], feed_dict={question1: q1_batch,
+
+                _, l = sess.run([train_step, loss], feed_dict={question1: q1_batch,
                                                            question1_longest_length: q1_longest_sentence_length,
                                                            question2: q2_batch,
                                                            question2_longest_length: q2_longest_sentence_length,
                                                            labels: y})
-                predicts = predicts[0]
-                precision, recall =  evaluate(predicts, y)
-                total_precision += precision
-                total_recall += recall
+                logger.info('training %d %d %f %f'%(epoch, step, time()-st, l/batch_size))
+                all_loss += l/batch_size
 
-            precision, recall = total_precision/total_steps, total_recall/total_steps
-            logger.info('%dth epoch PR: %f %f'%(epoch, precision, recall))
+            except:
+                import traceback
+                logger.error(traceback.format_exc())
+
+        saver.save(sess, model_filepath)
+        logger.info('%d epoch avg loss: %f'%(epoch, all_loss/total_steps))
+
+def test(df, model_filepath, graphs, sess):
+    predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels = graphs
+
+    saver = tf.train.Saver()
+    saver.restore(sess, model_filepath)
+
+    total_steps = int(df.shape[0] / batch_size + 1)
+    total_precision, total_recall = 0.0, 0.0
+
+    for step in range(total_steps):
+        st_index = step * batch_size
+        q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, st_index)
+        predicts = sess.run([predict], feed_dict={question1: q1_batch,
+                                                  question1_longest_length: q1_longest_sentence_length,
+                                                  question2: q2_batch,
+                                                  question2_longest_length: q2_longest_sentence_length,
+                                                  labels: y})
+        predicts = predicts[0]
+        precision, recall = evaluate(predicts, y)
+        total_precision += precision
+        total_recall += recall
+
+    precision, recall = total_precision / total_steps, total_recall / total_steps
+    logger.info('PR: %f %f' % (precision, recall))
+
+
+if __name__ == '__main__':
+    with tf.Session() as sess:
+        graphs = build_graph(sess)
+        train(df, './model/test', epoch_number, graphs, sess)
