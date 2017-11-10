@@ -70,14 +70,16 @@ def build_network(x, longest_length, W):
                       window_shape=(kernel_height, 1),
                       pooling_type='AVG',
                       padding='VALID')
+    reshape3 = tf.reshape(pool2, (-1, longest_length, kernel_number, 1))
 
+    # output
+    appended_outputs = tf.concat([reshape1, reshape2, reshape3], axis=2)
     # output: batch_size, 1, 1, kernel_number
     # all-op
-    final_pool = tf.reduce_mean(pool3,
-                                axis=1)
+    final_pool = tf.reduce_mean(appended_outputs, axis=1)
     
     # batch_size, kernel_number
-    output = tf.reshape(final_pool, shape=(-1, kernel_number))
+    output = tf.reshape(final_pool, shape=(-1, kernel_number*3))
     return output
 
 def build_graph(sess):
@@ -193,4 +195,4 @@ def test(df, graphs, sess, model_filepath='', title=''):
 if __name__ == '__main__':
     with tf.Session() as sess:
         graphs = build_graph(sess)
-        train(df, './model/3_layer', epoch_number, graphs, sess)
+        train(df, './model/3_layer_append_outputs', epoch_number, graphs, sess)
