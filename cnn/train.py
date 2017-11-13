@@ -3,8 +3,6 @@ import numpy as np
 from common import *
 
 from time import time
-
-
 #np.random.seed(0)
 
 embedding_size = 300
@@ -15,7 +13,7 @@ kernel_size = (kernel_height, embedding_size)
 stack_kernel_size = (kernel_height, kernel_number)
 num_classes = 2
 learning_rate = 0.001
-epoch_number = 100
+epoch_number = 300
 layner_number = 3
 
 def build_network(x, longest_length, W):
@@ -122,16 +120,20 @@ def train(df, model_filepath, epoch_number, graphs, sess, do_self_evaluation=Tru
 
     saver = tf.train.Saver()
 
+    df = df.sample(frac=1)
+    test_st = int(df.shape[0]*0.8)
+    train_set, test_set = df.iloc[:test_st, :], df.iloc[test_st:, :]
+
     for epoch in range(epoch_number):
         st = time()
         all_loss = 0
-        df = df.sample(frac=1)
-        total_steps = int(df.shape[0]/batch_size+1)
+        train_set = train_set.sample(frac=1)
+        total_steps = int(train_set.shape[0]/batch_size+1)
 
         for step in range(total_steps):
             try:
                 st_index = step*batch_size
-                q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(df, st_index)
+                q1_batch, q1_longest_sentence_length, q2_batch, q2_longest_sentence_length, y = make_batch(train_set, st_index)
 
                 _, l, p = sess.run([train_step, loss, predict], feed_dict={question1: q1_batch,
                                                            question1_longest_length: q1_longest_sentence_length,
@@ -140,7 +142,7 @@ def train(df, model_filepath, epoch_number, graphs, sess, do_self_evaluation=Tru
                                                            labels: y})
 
                 l = l.sum()
-                logger.info('training %d %d %f %f, %d %d'%(epoch, step, time()-st, l/batch_size, p.sum(), y.sum()))
+                #logger.info('training %d %d %f %f, %d %d'%(epoch, step, time()-st, l/batch_size, p.sum(), y.sum()))
                 all_loss += l/batch_size
 
             except KeyboardInterrupt:
@@ -154,7 +156,7 @@ def train(df, model_filepath, epoch_number, graphs, sess, do_self_evaluation=Tru
         logger.info('%d epoch avg loss: %f'%(epoch, all_loss/total_steps))
 
         if do_self_evaluation:
-            test(df, graphs, sess, title='training self evaluation')
+            test(test_set, graphs, sess, title='training self evaluation')
 
 def test(df, graphs, sess, model_filepath='', title=''):
     predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels = graphs
@@ -177,7 +179,7 @@ def test(df, graphs, sess, model_filepath='', title=''):
                                                       labels: y})
 
             p = p[0]
-            logger.info('testing %d %d' % (p.sum(), y.sum()))
+            #logger.info('testing %d %d' % (p.sum(), y.sum()))
         except KeyboardInterrupt:
             raise
 
