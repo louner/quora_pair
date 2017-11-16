@@ -6,7 +6,7 @@ from time import time
 #np.random.seed(0)
 
 embedding_size = 300
-kernel_height = 4
+kernel_height = 2
 vocab_shape = (66207, 300)
 kernel_number = 32
 kernel_size = (kernel_height, embedding_size)
@@ -14,7 +14,7 @@ stack_kernel_size = (kernel_height, kernel_number)
 num_classes = 2
 learning_rate = 0.001
 epoch_number = 300
-layner_number = 3
+layner_number = 5
 
 def build_network(x, longest_length, W):
     # load embedding W
@@ -22,10 +22,10 @@ def build_network(x, longest_length, W):
 
     # reshape to NHWC
     # H -> longest sentence length
-    reshape = tf.reshape(embedding, shape=(-1, longest_length, embedding_size, 1))
+    reshape1 = tf.reshape(embedding, shape=(-1, longest_length, embedding_size, 1))
 
     # pad at both ends of a sentence
-    pad1 = tf.pad(reshape, [[0, 0], [kernel_height - 1, kernel_height - 1], [0, 0], [0, 0]])
+    pad1 = tf.pad(reshape1, [[0, 0], [kernel_height - 1, kernel_height - 1], [0, 0], [0, 0]])
 
     # output: batch_size, longest_length+(kernel_height-1)*2-(kernel_hefight-1), 1, kernel_number
     # w-op
@@ -42,42 +42,32 @@ def build_network(x, longest_length, W):
                       pooling_type='AVG',
                       padding='VALID')
 
-    reshape1 = tf.reshape(pool1, (-1, longest_length, kernel_number, 1))
+    reshape2 = tf.reshape(pool1, (-1, longest_length, kernel_number, 1))
 
-    pad2 = tf.pad(reshape1, [[0, 0], [kernel_height - 1, kernel_height - 1], [0, 0], [0, 0]])
-    conv2 = tf.layers.conv2d(pad2,
-                            filters=kernel_number,
-                            kernel_size=stack_kernel_size,
-                            strides=(1, 1),
-                            padding='valid',
-                            activation=tf.tanh)
-    pool2 = tf.nn.pool(conv2,
-                      window_shape=(kernel_height, 1),
-                      pooling_type='AVG',
-                      padding='VALID')
-    reshape2 = tf.reshape(pool2, (-1, longest_length, kernel_number, 1))
-
-    pad3 = tf.pad(reshape2, [[0, 0], [kernel_height - 1, kernel_height - 1], [0, 0], [0, 0]])
-    conv3 = tf.layers.conv2d(pad3,
-                            filters=kernel_number,
-                            kernel_size=stack_kernel_size,
-                            strides=(1, 1),
-                            padding='valid',
-                            activation=tf.tanh)
-    pool3 = tf.nn.pool(conv3,
-                      window_shape=(kernel_height, 1),
-                      pooling_type='AVG',
-                      padding='VALID')
-    reshape3 = tf.reshape(pool2, (-1, longest_length, kernel_number, 1))
+    pad, conv, pool, reshape = [], [], [], []
+    reshape.append(reshape2)
+    for i in range(layner_number):
+        pad.append(tf.pad(reshape[-1], [[0, 0], [kernel_height - 1, kernel_height - 1], [0, 0], [0, 0]]))
+        conv.append(tf.layers.conv2d(pad[-1],
+                                 filters=kernel_number,
+                                 kernel_size=stack_kernel_size,
+                                 strides=(1, 1),
+                                 padding='valid',
+                                 activation=tf.tanh))
+        pool.append(tf.nn.pool(conv[-1],
+                          window_shape=(kernel_height, 1),
+                          pooling_type='AVG',
+                          padding='VALID'))
+        reshape.append(tf.reshape(pool[-1], (-1, longest_length, kernel_number, 1)))
 
     # output
-    appended_outputs = tf.concat([reshape1, reshape2, reshape3], axis=2)
+    appended_outputs = tf.concat(reshape, axis=2)
     # output: batch_size, 1, 1, kernel_number
     # all-op
     final_pool = tf.reduce_mean(appended_outputs, axis=1)
     
     # batch_size, kernel_number
-    output = tf.reshape(final_pool, shape=(-1, kernel_number*3))
+    output = tf.reshape(final_pool, shape=(-1, kernel_number*(layner_number+1)))
     return output
 
 def build_graph(sess):
@@ -118,6 +108,7 @@ def build_graph(sess):
 def train(df, model_filepath, epoch_number, graphs, sess, do_self_evaluation=True):
     predict, loss, train_step, question1, question1_longest_length, question2, question2_longest_length, labels = graphs
 
+    writer = tf.summary.FileWriter('summary', sess.graph)
     saver = tf.train.Saver()
 
     df = df.sample(frac=1)
