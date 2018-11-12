@@ -1,4 +1,4 @@
-
+# load train.py
 # coding: utf-8
 
 # In[1]:
@@ -13,7 +13,6 @@ from sklearn.model_selection import train_test_split
 import json
 from IPython import display
 import matplotlib.pyplot as plt
-get_ipython().magic('matplotlib inline')
 
 
 # In[2]:
@@ -26,6 +25,7 @@ reg_loss_coef = 0
 dropout_keep_probability = 1.0
 rnn_n_layers = 4
 UNSEEN = '@unseen@'
+vocab_size = 10
 
 
 # In[3]:
@@ -81,24 +81,20 @@ def read_json(filepath):
 
 # In[14]:
 
-train, vocab = make_vocab('data/train.csv')
-vocab.append(UNSEEN)
-word_id = dict([(word, id+1) for id,word in enumerate(vocab)])
-word_id[UNSEEN] = 0
-vocab_size = len(vocab)
+def load_data(train_fpath):
+    train, vocab = make_vocab('data/train.csv')
+    vocab.append(UNSEEN)
+    word_id = dict([(word, id+1) for id,word in enumerate(vocab)])
+    word_id[UNSEEN] = 0
+    vocab_size = len(vocab)
 
+    train['question_1_id'] = to_id(train['question1'], word_id)
+    train['question_2_id'] = to_id(train['question2'], word_id)
+    train['question_1_length'] = train['question_1_id'].apply(lambda x: len(x))
+    train['question_2_length'] = train['question_2_id'].apply(lambda x: len(x))
 
-# In[15]:
+    return train, vocab, vocab_size
 
-vocab_size
-
-
-# In[16]:
-
-train['question_1_id'] = to_id(train['question1'], word_id)
-train['question_2_id'] = to_id(train['question2'], word_id)
-train['question_1_length'] = train['question_1_id'].apply(lambda x: len(x))
-train['question_2_length'] = train['question_2_id'].apply(lambda x: len(x))
 
 
 # In[ ]:
@@ -217,62 +213,46 @@ def make_feed_dict(batch, lm, is_train=True):
     
     return feed_dict
 
-tf.reset_default_graph()
 
-global_step = tf.Variable(0, dtype=tf.int32, name='global_step', trainable=False)
-lm = LM('q')
+def train_LM():
+    tf.reset_default_graph()
 
-loss = lm.loss
-train_step = tf.train.AdadeltaOptimizer(learning_rate).minimize(loss, global_step=global_step)
+    global_step = tf.Variable(0, dtype=tf.int32, name='global_step', trainable=False)
+    lm = LM('q')
 
-metrics = []
-train_data, test_data = train_test_split(train, train_size=0.8, test_size=0.2)
-train.shape, train_data.shape, test_data.shape
+    loss = lm.loss
+    train_step = tf.train.AdadeltaOptimizer(learning_rate).minimize(loss, global_step=global_step)
 
-with tf.Session(config=tf.ConfigProto(device_count={'GPU': 1})) as sess:
-    sess.run(tf.global_variables_initializer())
-    
-    for batch in Batch(train_data, batch_size=batch_size):
-        feed_dict = make_feed_dict(batch, lm)
-        
-        _, Loss, step, shape = sess.run([train_step, loss, global_step, lm.tensors_shape], feed_dict=feed_dict)
-        
-        if step % 5 == 0:
-            val_loss = []
-            for bt in Batch(test_data, batch_size=batch_size):
-                feed_dict = make_feed_dict(bt, lm, is_train=False)
-                val_loss.append(sess.run(loss, feed_dict=feed_dict))
-                if len(val_loss) > test_data.shape[0]/batch_size:
-                    break
+    metrics = []
+    train_data, test_data = train_test_split(train, train_size=0.8, test_size=0.2)
+    train.shape, train_data.shape, test_data.shape
 
-        
-            metrics.append({'train_loss': Loss, 'step': step, 'val_loss': np.mean(val_loss)})
-            df = pd.DataFrame(metrics)
-            plt.scatter(df['step'], df['train_loss'], color='g')
-            plt.scatter(df['step'], df['val_loss'], color='r')
-            display.display(plt.gcf())
-            display.clear_output(wait=True)
+    with tf.Session(config=tf.ConfigProto(device_count={'GPU': 1})) as sess:
+        sess.run(tf.global_variables_initializer())
 
-        if step >= 10000:
-            break
+        for batch in Batch(train_data, batch_size=batch_size):
+            feed_dict = make_feed_dict(batch, lm)
+
+            _, Loss, step, shape = sess.run([train_step, loss, global_step, lm.tensors_shape], feed_dict=feed_dict)
+
+            if step % 5 == 0:
+                val_loss = []
+                for bt in Batch(test_data, batch_size=batch_size):
+                    feed_dict = make_feed_dict(bt, lm, is_train=False)
+                    val_loss.append(sess.run(loss, feed_dict=feed_dict))
+                    if len(val_loss) > test_data.shape[0]/batch_size:
+                        break
 
 
-# In[ ]:
+                metrics.append({'train_loss': Loss, 'step': step, 'val_loss': np.mean(val_loss)})
+                df = pd.DataFrame(metrics)
+                plt.scatter(df['step'], df['train_loss'], color='g')
+                plt.scatter(df['step'], df['val_loss'], color='r')
+                display.display(plt.gcf())
+                display.clear_output(wait=True)
 
-print('\n'.join([str(var) for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)]))
-
-
-# In[60]:
-
-tf.reset_default_graph()
-inp =  tf.placeholder(dtype=tf.int32, shape=[None])
-x = inp + tf.ones_like(inp)
-mask = tf.sequence_mask(lengths=x)
-with tf.Session() as sess:
-    print(sess.run(mask, feed_dict={inp:[1,2,3]}))
-
-
-# In[56]:
+            if step >= 10000:
+                break
 
 class StackedLSTM(LSTM):
     def build_rnn(self):
@@ -320,94 +300,43 @@ class BiLSTM(LSTM):
             self.last_state = tf.concat(last_states, axis=1)
 
 
-# In[52]:
-
-tf.reset_default_graph()
-
-
-# In[78]:
-
-#l2 similairty loss
-global_step = tf.Variable(0, dtype=tf.int32, name='global_step', trainable=False)
-label = tf.placeholder(dtype=tf.float32, name='label')
+def build_network():
+    #l2 similairty loss
+    global_step = tf.Variable(0, dtype=tf.int32, name='global_step', trainable=False)
+    label = tf.placeholder(dtype=tf.float32, name='label')
 
 
-q1 = LSTM('q1')
-q2 = LSTM('q2')
+    q1 = LSTM('q1')
+    q2 = LSTM('q2')
 
-'''
-q1 = StackedLSTM('q1')
-q2 = StackedLSTM('q2')
+    '''
+    q1 = StackedLSTM('q1')
+    q2 = StackedLSTM('q2')
+    
+    q1 = BiLSTM('q1')
+    q2 = BiLSTM('q2')
+    '''
 
-q1 = BiLSTM('q1')
-q2 = BiLSTM('q2')
-'''
+    similarity = tf.exp(tf.norm(q1.last_state-q2.last_state, ord=1, axis=1)*-1)
+    predict = tf.cast(similarity >= 0.5, dtype=tf.float32)
+    loss = tf.nn.l2_loss(similarity-label)
 
-similarity = tf.exp(tf.norm(q1.last_state-q2.last_state, ord=1, axis=1)*-1)
-predict = tf.cast(similarity >= 0.5, dtype=tf.float32)
-loss = tf.nn.l2_loss(similarity-label)
-
-
-# In[53]:
-
-#concated l1/dot similarity & cross entropy loss
-global_step = tf.Variable(0, dtype=tf.int32, name='global_step', trainable=False)
-label = tf.placeholder(dtype=tf.int64, name='label')
-label_cat = tf.one_hot(label, 2)
-
-q1 = LSTM('q1')
-q2 = LSTM('q2')
-
-l1_similarity = tf.abs(q1.last_state-q2.last_state)
-dot_similarity = tf.multiply(q1.last_state, q2.last_state)
-similarity = tf.concat([l1_similarity, dot_similarity], axis=1)
-
-logits = tf.layers.dense(inputs=similarity, units=hidden_size/2, activation=tf.nn.tanh)
-logits = tf.layers.dense(inputs=logits, units=2, activation=tf.nn.tanh)
-loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=label_cat, logits=logits))
-predict = tf.argmax(logits, axis=1)
+    train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step)
+    accuracy = tf.reduce_mean(tf.cast(tf.equal(label, predict), dtype=tf.float32))
 
 
-# In[54]:
-
-lstm_vars = [var for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if not 'Adam' in var.name and ('lstm' in var.name or 'dense' in var.name)]
-for var in lstm_vars:
-    print(var)
-grad = tf.gradients(loss, lstm_vars)
-
-
-# In[15]:
-
-for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='bi_lstm'):
-    print(var)
-
-
-# In[55]:
-
-train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step)
-accuracy = tf.reduce_mean(tf.cast(tf.equal(label, predict), dtype=tf.float32))
-
-
-# In[143]:
-
-#regularize_loss = tf.reduce_mean([tf.nn.l2_loss(tf.cast(tv, dtype=tf.float32)) for tv in tf.trainable_variables()])
-regularize_loss = tf.reduce_mean([tf.nn.l2_loss(tf.cast(tv, dtype=tf.float32)) for tv in tf.trainable_variables() if not 'b_' in tv.name])
-loss += reg_loss_coef * regularize_loss
-
-
-# In[24]:
-
-#clip gradient by norm, prevent observed gradient exploding
-optimizer = tf.train.AdamOptimizer(learning_rate)
-grad_vars = optimizer.compute_gradients(loss)
-grad_vars = [(tf.clip_by_norm(g, clip_norm=5), var) for g,var in grad_vars if var is not None]
-train_step = optimizer.apply_gradients(grads_and_vars=grad_vars, global_step=global_step)
-accuracy = tf.reduce_mean(tf.cast(tf.equal(label, predict), dtype=tf.float32))
+def clip():
+    #clip gradient by norm, prevent observed gradient exploding
+    optimizer = tf.train.AdamOptimizer(learning_rate)
+    grad_vars = optimizer.compute_gradients(loss)
+    grad_vars = [(tf.clip_by_norm(g, clip_norm=5), var) for g,var in grad_vars if var is not None]
+    train_step = optimizer.apply_gradients(grads_and_vars=grad_vars, global_step=global_step)
+    accuracy = tf.reduce_mean(tf.cast(tf.equal(label, predict), dtype=tf.float32))
 
 
 # In[56]:
 
-def make_feed_dict(batch, q1, q2, is_train=True):
+def make_feed_dict(batch, q1, q2, label, is_train=True):
     data, labels, lengths = batch
     q1_input = pad_zero(data['question_1_id'], lengths['question_1_length'].values)
     q2_input = pad_zero(data['question_2_id'], lengths['question_2_length'].values)
@@ -433,109 +362,105 @@ def make_feed_dict(batch, q1, q2, is_train=True):
 
 # In[57]:
 
-metrics = []
-train_data, test_data = train_test_split(train, train_size=0.8, test_size=0.2)
-train.shape, train_data.shape, test_data.shape
+def train():
+
+    metrics = []
+    train_data, test_data = train_test_split(train, train_size=0.8, test_size=0.2)
+    train.shape, train_data.shape, test_data.shape
 
 
-# In[58]:
+    # In[58]:
 
-with tf.Session(config=tf.ConfigProto(device_count={'GPU': 1})) as sess:
-    #writer = tf.summary.FileWriter('summary/%d'%(int(time())), sess.graph)
-    writer = tf.summary.FileWriter('summary', sess.graph)
-    
-    sess.run(tf.global_variables_initializer())
-    for batch in Batch(train_data, batch_size=batch_size):
-        feed_dict = make_feed_dict(batch, q1, q2)
-        
-        _, Loss, step, acc, gradients = sess.run([train_step, loss, global_step, accuracy, grad], feed_dict=feed_dict)
-                
-        if step % 5 == 0:
-            summary = tf.Summary()
-            summary.value.add(tag='train/loss', simple_value=Loss)
-            writer.add_summary(summary, global_step=step)
-            writer.flush()
-            
-        if step % 100 == 0:
-            val_acc = []
-            for bt in Batch(test_data, batch_size=batch_size):
-                feed_dict = make_feed_dict(bt, q1, q2, is_train=False)
-                val_acc.append(sess.run(accuracy, feed_dict=feed_dict))
-                if len(val_acc) > test_data.shape[0]/batch_size:
-                    break
-            
-            metric = {'train_loss': Loss, 'step': step, 'acc': acc, 'val_acc': np.mean(val_acc)}
-            for i,g in enumerate(gradients):
-                metric['grad_%d'%(i)] = np.linalg.norm(g, ord=2)
-            metrics.append(metric)
-            
-            df = pd.DataFrame(metrics)
-            plt.scatter(df['step'], df['acc'])
-            #plt.scatter(df['step'], df['train_loss'])
+    with tf.Session(config=tf.ConfigProto(device_count={'GPU': 1})) as sess:
+        #writer = tf.summary.FileWriter('summary/%d'%(int(time())), sess.graph)
+        writer = tf.summary.FileWriter('summary', sess.graph)
 
-            '''
-            plt.scatter(df['step'], df['grad_0'])
-            plt.scatter(df['step'], df['grad_1'])
-            plt.scatter(df['step'], df['grad_2'])
-            plt.scatter(df['step'], df['grad_3'])
-            '''
+        sess.run(tf.global_variables_initializer())
+        for batch in Batch(train_data, batch_size=batch_size):
+            feed_dict = make_feed_dict(batch, q1, q2)
 
-            plt.scatter(df['step'], df['val_acc'])
-            display.display(plt.gcf())
-            display.clear_output(wait=True)
-            
-            #print(step, Loss, acc)
-            
-        if step >= 10000:
-            break
+            _, Loss, step, acc, gradients = sess.run([train_step, loss, global_step, accuracy, grad], feed_dict=feed_dict)
 
+            if step % 5 == 0:
+                summary = tf.Summary()
+                summary.value.add(tag='train/loss', simple_value=Loss)
+                writer.add_summary(summary, global_step=step)
+                writer.flush()
 
-# In[46]:
+            if step % 100 == 0:
+                val_acc = []
+                for bt in Batch(test_data, batch_size=batch_size):
+                    feed_dict = make_feed_dict(bt, q1, q2, is_train=False)
+                    val_acc.append(sess.run(accuracy, feed_dict=feed_dict))
+                    if len(val_acc) > test_data.shape[0]/batch_size:
+                        break
 
-gradients
+                metric = {'train_loss': Loss, 'step': step, 'acc': acc, 'val_acc': np.mean(val_acc)}
+                for i,g in enumerate(gradients):
+                    metric['grad_%d'%(i)] = np.linalg.norm(g, ord=2)
+                metrics.append(metric)
+
+                df = pd.DataFrame(metrics)
+                plt.scatter(df['step'], df['acc'])
+                #plt.scatter(df['step'], df['train_loss'])
+
+                '''
+                plt.scatter(df['step'], df['grad_0'])
+                plt.scatter(df['step'], df['grad_1'])
+                plt.scatter(df['step'], df['grad_2'])
+                plt.scatter(df['step'], df['grad_3'])
+                '''
+
+                plt.scatter(df['step'], df['val_acc'])
+                display.display(plt.gcf())
+                display.clear_output(wait=True)
+
+                #print(step, Loss, acc)
+
+            if step >= 10000:
+                break
 
 
-# In[59]:
+def plot():
+    df = pd.DataFrame(metrics)
 
-df = pd.DataFrame(metrics)
-
-plt.scatter(df['step'], df['grad_0'])
-plt.scatter(df['step'], df['grad_1'])
-plt.scatter(df['step'], df['grad_2'])
-plt.scatter(df['step'], df['grad_3'])
-
-
-# In[83]:
-
-df = pd.DataFrame(metrics)
-plt.scatter(df['step'], df['acc'])
-#plt.scatter(df['step'], df['train_loss'])
-'''
-plt.scatter(df['step'], df['grad_0'])
-plt.scatter(df['step'], df['grad_1'])
-plt.scatter(df['step'], df['grad_2'])
-plt.scatter(df['step'], df['grad_3'])
-'''
-
-plt.scatter(df['step'], df['val_acc'])
+    plt.scatter(df['step'], df['grad_0'])
+    plt.scatter(df['step'], df['grad_1'])
+    plt.scatter(df['step'], df['grad_2'])
+    plt.scatter(df['step'], df['grad_3'])
 
 
-# In[22]:
+    # In[83]:
 
-print(grad_vars)
+    df = pd.DataFrame(metrics)
+    plt.scatter(df['step'], df['acc'])
+    #plt.scatter(df['step'], df['train_loss'])
+    '''
+    plt.scatter(df['step'], df['grad_0'])
+    plt.scatter(df['step'], df['grad_1'])
+    plt.scatter(df['step'], df['grad_2'])
+    plt.scatter(df['step'], df['grad_3'])
+    '''
+
+    plt.scatter(df['step'], df['val_acc'])
 
 
-# In[81]:
+    # In[22]:
 
-train.shape, train_data.shape, test_data.shape
-
-
-# In[131]:
-
-train['is_duplicate'].mean()
+    print(grad_vars)
 
 
-# In[ ]:
+    # In[81]:
+
+    train.shape, train_data.shape, test_data.shape
+
+
+    # In[131]:
+
+    train['is_duplicate'].mean()
+
+
+    # In[ ]:
 
 
 
